@@ -1,17 +1,10 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
-import { init } from './util/earth';
-import { test } from './util/test';
+import { RouterView } from 'vue-router';
 
-onMounted(() => {
-  init();
-});
 </script>
 
 <template>
-  <div class="main" id="main">
-
-  </div>
+  <router-view></router-view>
 </template>
 
 <style scoped lang="less">

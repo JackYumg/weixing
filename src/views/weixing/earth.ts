@@ -22,7 +22,7 @@ import {
 
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js'
-
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 let camera: THREE.PerspectiveCamera | null = null
 let scene: THREE.Scene | null = null
 let renderer: WebGPURenderer | null = null
@@ -43,19 +43,12 @@ export function init() {
   )
 
   camera.position.set(2, 2, 2)
-
-  const z = new THREE.Vector3(0, 0, camera?.position.z)
-  const y = new THREE.Vector3(0, camera?.position.y, 0)
-  const x = new THREE.Vector3(camera?.position.x, 0, 0)
-  const res = z.add(y).add(x)
-  console.log(res)
-
   scene = new THREE.Scene()
 
   new THREE.TextureLoader().load('orbit-background.jpg', texture => {
     if (scene) {
       scene.background = texture
-      renderer.render(scene, camera)
+      camera && renderer!.render(scene, camera)
     }
   })
 
@@ -197,7 +190,7 @@ export function init() {
   renderer.setPixelRatio(window.devicePixelRatio)
   renderer.setSize(window.innerWidth, window.innerHeight)
   renderer.setAnimationLoop(animate)
-  document.getElementById('main').appendChild(renderer.domElement)
+  document.getElementById('main')!.appendChild(renderer.domElement)
 
   // controls
 
@@ -208,39 +201,56 @@ export function init() {
   controls.addEventListener('change', e => {})
 
   // 添加虚线圆环到场景
-  const dashedRing = createSatelliteTrack(1.5, 1000, 2, 0.1)
+  const dashedRing = createSatelliteTrack(1.5, 1000)
   scene.add(dashedRing)
-  const dashedRing2 = createSatelliteTrack2(1.7, 1000, 2, 0.1)
+  const dashedRing2 = createSatelliteTrack2(1.7, 1000)
   scene.add(dashedRing2)
 
   // 创建卫星
-  new THREE.TextureLoader().load('satellite.jpg', texture => {
-    if (scene) {
-      const geometry33 = new THREE.PlaneGeometry(0.4, 0.42)
-      const textureLoader33 = new THREE.TextureLoader()
-      const texture33 = textureLoader33.load('satellite.jpg')
 
-      const material33 = new THREE.MeshBasicMaterial({
-        map: texture33,
-        opacity: 1,
-        transparent: true,
-      })
-      const cube = new THREE.Mesh(geometry33, material33)
-      satellite = cube
+  // 创建GLTFLoader来加载模型
+  const gltfLoader = new GLTFLoader()
 
-      // const geometryLabel = new THREE.PlaneGeometry(127.5 / 300, 41 / 300)
-      // const labelTexture = textureLoader33.load('label.png')
-      // const materialLabel = new THREE.MeshBasicMaterial({
-      //   map: labelTexture,
-      //   opacity: 1,
-      //   transparent: true,
-      // })
-      // const label = new THREE.Mesh(geometryLabel, materialLabel)
-      // satelliteLabel = label
-      scene.add(cube)
-      // scene.add(label)
-    }
-  })
+  gltfLoader.load(
+    'models/untitled.glb',
+    gltf => {
+      satellite = gltf.scene
+      console.log(gltf)
+      scene!.add(gltf.scene)
+    },
+    undefined,
+    error => {
+      console.error(error)
+    },
+  )
+
+  // new THREE.TextureLoader().load('satellite.jpg', texture => {
+  //   if (scene) {
+  //     const geometry33 = new THREE.PlaneGeometry(0.4, 0.42)
+  //     const textureLoader33 = new THREE.TextureLoader()
+  //     const texture33 = textureLoader33.load('satellite.jpg')
+
+  //     const material33 = new THREE.MeshBasicMaterial({
+  //       map: texture33,
+  //       opacity: 1,
+  //       transparent: true,
+  //     })
+  //     const cube = new THREE.Mesh(geometry33, material33)
+  //     satellite = cube
+
+  //     // const geometryLabel = new THREE.PlaneGeometry(127.5 / 300, 41 / 300)
+  //     // const labelTexture = textureLoader33.load('label.png')
+  //     // const materialLabel = new THREE.MeshBasicMaterial({
+  //     //   map: labelTexture,
+  //     //   opacity: 1,
+  //     //   transparent: true,
+  //     // })
+  //     // const label = new THREE.Mesh(geometryLabel, materialLabel)
+  //     // satelliteLabel = label
+  //     scene.add(cube)
+  //     // scene.add(label)
+  //   }
+  // })
   // 绘制间断的圆环
   window.addEventListener('resize', onWindowResize)
 }
@@ -290,38 +300,28 @@ function createSatelliteTrack2(radius, numPoints) {
 }
 
 function onWindowResize() {
-  camera.aspect = window.innerWidth / window.innerHeight
-  camera.updateProjectionMatrix()
+  camera!.aspect = window.innerWidth / window.innerHeight
+  camera!.updateProjectionMatrix()
 
-  renderer.setSize(window.innerWidth, window.innerHeight)
+  renderer!.setSize(window.innerWidth, window.innerHeight)
 }
 
 async function animate() {
-  const delta = clock.getDelta()
-  globe.rotation.y += delta * 0.025
+  const delta = clock!.getDelta()
+  globe!.rotation.y += delta * 0.025
   satellite &&
     satellite.position.set(
       Math.cos(Date.now() * 0.0001) * 1.5,
       Math.sin(Date.now() * 0.0001) * 1.5,
       0,
     )
-  satelliteLabel &&
-    satelliteLabel.position.set(
-      Math.cos(Date.now() * 0.0001) * 1.5,
-      Math.sin(Date.now() * 0.0001) * 1.5,
-      0,
-    )
-  Object.assign(satelliteLabel.rotation, {
-    x: camera?.rotation.y,
-    y: camera?.rotation.z,
-    z: camera?.rotation.x,
-  })
-  Object.assign(satellite.rotation, {
-    x: camera?.rotation.y,
-    y: camera?.rotation.z,
-    z: camera?.rotation.x,
-  })
-  controls.update()
+  satellite &&
+    Object.assign(satellite.rotation, {
+      x: camera?.rotation.y,
+      y: camera?.rotation.z,
+      z: camera?.rotation.x,
+    })
+  controls!.update()
 
-  renderer.render(scene, camera)
+  scene && renderer!.render(scene, camera)
 }
