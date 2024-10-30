@@ -32,6 +32,10 @@ let clock: THREE.Clock | null = null
 let satellite
 let satelliteLabel
 
+const raycaster = new THREE.Raycaster()
+// 创建一个鼠标位置向量
+const mouse = new THREE.Vector2()
+
 export function init() {
   clock = new THREE.Clock()
 
@@ -217,6 +221,26 @@ export function init() {
       satellite = gltf.scene
       console.log(gltf)
       scene!.add(gltf.scene)
+      document.addEventListener('click', event => {
+        // 更新鼠标位置向量
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1
+
+        // 使用鼠标位置向量和当前时间作为射线投射器的参数
+        raycaster.setFromCamera(mouse, camera)
+
+        // 计算物体和射线的交点
+        const intersects = raycaster.intersectObjects(gltf.scene.children)
+
+        // 如果有交点
+        if (intersects.length > 0) {
+          // 取第一个交点的对象
+          const intersection = intersects[0]
+
+          // 你可以在这里添加你的点击事件处理逻辑
+          console.log('Clicked object:', intersection.object)
+        }
+      })
     },
     undefined,
     error => {

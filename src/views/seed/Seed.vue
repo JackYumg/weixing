@@ -12,9 +12,8 @@
 <script lang="ts" setup>
 import { onMounted, reactive, ref } from 'vue';
 import { createDemData, Seed, seedFlood } from './seed';
-
 const grids = ref<Seed[][]>([]);
-const gridSize = ref(10);
+const gridSize = ref(5);
 const containerSize = reactive({
     width: `1000px`,
     height: `800px`,

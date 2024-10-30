@@ -20,6 +20,11 @@ const router = createRouter({
       name: 'seed',
       component: () => import('./../views/seed/Seed.vue'),
     },
+    {
+      path: '/transform',
+      name: 'transform',
+      component: () => import('./../views/transform/Transform.vue'),
+    },
   ],
 })
 
