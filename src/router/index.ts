@@ -25,6 +25,26 @@ const router = createRouter({
       name: 'transform',
       component: () => import('./../views/transform/Transform.vue'),
     },
+    {
+      path: '/roobot',
+      name: 'roobot',
+      component: () => import('./../views/roobot/Roobot.vue'),
+    },
+    {
+      path: '/clip',
+      name: 'clip',
+      component: () => import('./../views/clip/Clip.vue'),
+    },
+    {
+      path: '/waterMap',
+      name: 'waterMap',
+      component: () => import('./../views/waterMap/WaterMap.vue'),
+    },
+    {
+      path: '/text',
+      name: 'text',
+      component: () => import('./../views/text/Text.vue'),
+    },
   ],
 })
 

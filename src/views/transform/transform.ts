@@ -5,11 +5,12 @@ export function initMap() {
   const map = new Map({
     container: 'transform',
     style: 'mapbox://styles/mapbox/satellite-streets-v12',
-    center: [0, 0],
-    zoom: 1,
+    center: [105.53, 29.2323],
+    zoom: 8,
     accessToken:
       'pk.eyJ1Ijoic2FuZm9yIiwiYSI6ImNsd2dnbWE2NzAzM3kyanFtOTl1czVsYW0ifQ.vqm7JFMDU1EadQZF-ijs4g',
   })
+  map.setTerrain({})
   return map
 }
 

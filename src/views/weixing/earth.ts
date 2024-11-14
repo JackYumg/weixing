@@ -1,351 +1,210 @@
-import * as THREE from 'three'
 import {
-  step,
-  normalWorld,
-  output,
-  texture,
-  vec3,
-  vec4,
-  normalize,
-  positionWorld,
-  bumpMap,
-  cameraPosition,
-  color,
-  uniform,
-  mix,
-  uv,
-  max,
+  AxesHelper,
+  BoxGeometry,
+  CameraHelper,
+  Color,
+  DirectionalLight,
+  GridHelper,
+  Group,
+  HemisphereLight,
+  Mesh,
+  MeshBasicMaterial,
   MeshStandardNodeMaterial,
-  WebGPURenderer,
-  MeshBasicNodeMaterial,
-} from 'three/tsl'
+  PerspectiveCamera,
+  PlaneGeometry,
+  Scene,
+  SphereGeometry,
+  SRGBColorSpace,
+  Texture,
+  TextureLoader,
+} from 'three/webgpu';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { WebGLRenderer } from 'three';
+import { OrbitControls } from 'three/examples/jsm/Addons.js';
+import Stats from 'three/addons/libs/stats.module.js';
 
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { GUI } from 'three/addons/libs/lil-gui.module.min.js'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-let camera: THREE.PerspectiveCamera | null = null
-let scene: THREE.Scene | null = null
-let renderer: WebGPURenderer | null = null
-let controls: OrbitControls | null = null
-let globe: THREE.Mesh | null = null
-let clock: THREE.Clock | null = null
-let satellite
-let satelliteLabel
+const gltfLoader = new GLTFLoader();
+const textureLoader = new TextureLoader();
 
-const raycaster = new THREE.Raycaster()
-// 创建一个鼠标位置向量
-const mouse = new THREE.Vector2()
+type CallbackType = (...args: unknown[]) => void;
 
-export function init() {
-  clock = new THREE.Clock()
+export type EathEventType = 'cailiao-loaded' | 'modal-loaded';
 
-  camera = new THREE.PerspectiveCamera(
-    50,
+export class Earth {
+  domId = '';
+  stats = new Stats();
+  /**
+   * 全局场景
+   */
+  private scene: Scene = new Scene();
+  controls!: OrbitControls;
+  /** 相机 */
+  private camera: PerspectiveCamera = new PerspectiveCamera(
+    45,
     window.innerWidth / window.innerHeight,
-    0.1,
-    100,
-  )
-
-  camera.position.set(2, 2, 2)
-  scene = new THREE.Scene()
-
-  new THREE.TextureLoader().load('orbit-background.jpg', texture => {
-    if (scene) {
-      scene.background = texture
-      camera && renderer!.render(scene, camera)
-    }
-  })
-
-  // sun
-  const sun = new THREE.DirectionalLight('#ffffff', 161)
-  sun.position.set(-2, -2, -2)
-  scene.add(sun)
-
-  // uniforms
-
-  const atmosphereDayColor = uniform(color('#4db2ff'))
-  const atmosphereTwilightColor = uniform(color('#ffffff'))
-  const roughnessLow = uniform(0)
-  const roughnessHigh = uniform(0)
-
-  // textures
-
-  const textureLoader = new THREE.TextureLoader()
-
-  const dayTexture = textureLoader.load('earth-bg.jpg')
-  dayTexture.colorSpace = THREE.SRGBColorSpace
-  dayTexture.anisotropy = 8
-
-  const nightTexture = textureLoader.load('earth-bg.jpg')
-  nightTexture.colorSpace = THREE.SRGBColorSpace
-  nightTexture.anisotropy = 8
-
-  const bumpRoughnessCloudsTexture = textureLoader.load('earth-bg.jpg')
-  bumpRoughnessCloudsTexture.anisotropy = 8
-
-  // fresnel
-
-  const viewDirection = positionWorld.sub(cameraPosition).normalize()
-  const fresnel = viewDirection.dot(normalWorld).abs().oneMinus().toVar()
-
-  // sun orientation
-
-  const sunOrientation = normalWorld.dot(normalize(sun.position)).toVar()
-
-  // atmosphere color
-
-  const atmosphereColor = mix(
-    atmosphereTwilightColor,
-    atmosphereDayColor,
-    sunOrientation.smoothstep(-0.25, 0.75),
-  )
-
-  // globe
-
-  const globeMaterial = new MeshStandardNodeMaterial()
-
-  const cloudsStrength = texture(bumpRoughnessCloudsTexture, uv()).b.smoothstep(
-    0.2,
     1,
-  )
+    1000,
+  );
+  /** 渲染器 */
+  private renderer = new WebGLRenderer();
 
-  globeMaterial.colorNode = mix(
-    texture(dayTexture),
-    vec3(1),
-    cloudsStrength.mul(2),
-  )
+  constructor(elmentId: string, width: number, height: number) {
+    this.domId = elmentId;
+    this.camera.aspect = width / height;
+    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setSize(width, height);
+    this.scene.background = new Color(0xe0e0e0);
 
-  const roughness = max(
-    texture(bumpRoughnessCloudsTexture).g,
-    step(0.01, cloudsStrength),
-  )
-  globeMaterial.roughnessNode = roughness.remap(
-    0,
-    1,
-    roughnessLow,
-    roughnessHigh,
-  )
+    Promise.all([
+      this.loadBackground(),
+      this.loadModels(),
+      this.loadTexture(),
+    ]).then(() => {
+      this.emits('cailiao-loaded');
+    });
+  }
+  //#region 模型
+  // 地球
+  private earth!: Mesh; //卫星
+  /** 卫星 */
+  private satellites: Group[] = [];
 
-  const night = texture(nightTexture)
-  const dayStrength = sunOrientation.smoothstep(-0.25, 0.5)
+  /** 地球半径 */
+  private earthRadius = 1200;
+  /** 订阅后的回调 */
+  private onModalLoadCallbacks: CallbackType[] = [];
+  /** 订阅后的回调 */
+  private onCailiaoCallbacks: CallbackType[] = [];
 
-  const atmosphereDayStrength = sunOrientation.smoothstep(-0.5, 1)
-  const atmosphereMix = atmosphereDayStrength.mul(fresnel.pow(2)).clamp(0, 1)
+  light = new DirectionalLight('#de090f');
 
-  let finalOutput = mix(night.rgb, output.rgb, dayStrength)
-  finalOutput = mix(finalOutput, atmosphereColor, atmosphereMix)
+  /** 背景图片 */
+  private background!: Texture;
+  private dayTexture!: Texture;
 
-  globeMaterial.outputNode = vec4(finalOutput, output.a)
+  private loadTexture() {
+    return new Promise(resolve => {
+      textureLoader.load('earth-bg.jpg', dayTexture => {
+        dayTexture.colorSpace = SRGBColorSpace;
+        dayTexture.anisotropy = 8;
+        this.dayTexture = dayTexture;
+        resolve(true);
+      });
+    });
+  }
 
-  const bumpElevation = max(
-    texture(bumpRoughnessCloudsTexture).r,
-    cloudsStrength,
-  )
-  globeMaterial.normalNode = bumpMap(bumpElevation)
+  private loadModels() {
+    return new Promise(resolve => {
+      gltfLoader.load('models/untitled.glb', gltf => {
+        this.satellites.push(gltf.scene);
+        this.emits('modal-loaded');
+        resolve(true);
+      });
+    });
+  }
 
-  const sphereGeometry = new THREE.SphereGeometry(1, 64, 64)
-  globe = new THREE.Mesh(sphereGeometry, globeMaterial)
-  scene.add(globe)
+  private createEarth() {
+    const sphereGeometry = new SphereGeometry(2, 100, 100);
+    const globeMaterial = new MeshStandardNodeMaterial({
+      color: 0xffffff,
+      envMap: this.dayTexture,
+    });
+    this.earth = new Mesh(sphereGeometry, globeMaterial);
+    this.earth.position.set(0, 0, 0);
+    this.scene.add(this.earth);
+  }
+  //#endregion
 
-  // atmosphere
-
-  const atmosphereMaterial = new MeshBasicNodeMaterial({
-    side: THREE.BackSide,
-    transparent: true,
-  })
-  let alpha = fresnel.remap(0.73, 1, 1, 0).pow(3)
-  alpha = alpha.mul(sunOrientation.smoothstep(-0.5, 1))
-  atmosphereMaterial.outputNode = vec4(atmosphereColor, alpha)
-
-  const atmosphere = new THREE.Mesh(sphereGeometry, atmosphereMaterial)
-  atmosphere.scale.setScalar(1.04)
-  scene.add(atmosphere)
-
-  // debug
-
-  const gui = new GUI()
-
-  gui
-    .addColor(
-      { color: atmosphereDayColor.value.getHex(THREE.SRGBColorSpace) },
-      'color',
-    )
-    .onChange(value => {
-      atmosphereDayColor.value.set(value)
-    })
-    .name('atmosphereDayColor')
-
-  gui
-    .addColor(
-      { color: atmosphereTwilightColor.value.getHex(THREE.SRGBColorSpace) },
-      'color',
-    )
-    .onChange(value => {
-      atmosphereTwilightColor.value.set(value)
-    })
-    .name('atmosphereTwilightColor')
-
-  gui.add(roughnessLow, 'value', 0, 1, 0.001).name('roughnessLow')
-  gui.add(roughnessHigh, 'value', 0, 1, 0.001).name('roughnessHigh')
-
-  // renderer
-
-  renderer = new WebGPURenderer()
-  renderer.setPixelRatio(window.devicePixelRatio)
-  renderer.setSize(window.innerWidth, window.innerHeight)
-  renderer.setAnimationLoop(animate)
-  document.getElementById('main')!.appendChild(renderer.domElement)
-
-  // controls
-
-  controls = new OrbitControls(camera, renderer.domElement)
-  controls.enableDamping = true
-  controls.minDistance = 0.1
-  controls.maxDistance = 50
-  controls.addEventListener('change', e => {})
-
-  // 添加虚线圆环到场景
-  const dashedRing = createSatelliteTrack(1.5, 1000)
-  scene.add(dashedRing)
-  const dashedRing2 = createSatelliteTrack2(1.7, 1000)
-  scene.add(dashedRing2)
-
-  // 创建卫星
-
-  // 创建GLTFLoader来加载模型
-  const gltfLoader = new GLTFLoader()
-
-  gltfLoader.load(
-    'models/untitled.glb',
-    gltf => {
-      satellite = gltf.scene
-      console.log(gltf)
-      scene!.add(gltf.scene)
-      document.addEventListener('click', event => {
-        // 更新鼠标位置向量
-        mouse.x = (event.clientX / window.innerWidth) * 2 - 1
-        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1
-
-        // 使用鼠标位置向量和当前时间作为射线投射器的参数
-        raycaster.setFromCamera(mouse, camera)
-
-        // 计算物体和射线的交点
-        const intersects = raycaster.intersectObjects(gltf.scene.children)
-
-        // 如果有交点
-        if (intersects.length > 0) {
-          // 取第一个交点的对象
-          const intersection = intersects[0]
-
-          // 你可以在这里添加你的点击事件处理逻辑
-          console.log('Clicked object:', intersection.object)
+  private loadBackground() {
+    return new Promise(resolve => {
+      new TextureLoader().load('orbit-background.jpg', texture => {
+        if (this.scene) {
+          this.background = texture;
+          // this.scene.background = texture;
+          this.renderer.render(this.scene, this.camera);
+          resolve(true);
         }
-      })
-    },
-    undefined,
-    error => {
-      console.error(error)
-    },
-  )
-
-  // new THREE.TextureLoader().load('satellite.jpg', texture => {
-  //   if (scene) {
-  //     const geometry33 = new THREE.PlaneGeometry(0.4, 0.42)
-  //     const textureLoader33 = new THREE.TextureLoader()
-  //     const texture33 = textureLoader33.load('satellite.jpg')
-
-  //     const material33 = new THREE.MeshBasicMaterial({
-  //       map: texture33,
-  //       opacity: 1,
-  //       transparent: true,
-  //     })
-  //     const cube = new THREE.Mesh(geometry33, material33)
-  //     satellite = cube
-
-  //     // const geometryLabel = new THREE.PlaneGeometry(127.5 / 300, 41 / 300)
-  //     // const labelTexture = textureLoader33.load('label.png')
-  //     // const materialLabel = new THREE.MeshBasicMaterial({
-  //     //   map: labelTexture,
-  //     //   opacity: 1,
-  //     //   transparent: true,
-  //     // })
-  //     // const label = new THREE.Mesh(geometryLabel, materialLabel)
-  //     // satelliteLabel = label
-  //     scene.add(cube)
-  //     // scene.add(label)
-  //   }
-  // })
-  // 绘制间断的圆环
-  window.addEventListener('resize', onWindowResize)
-}
-
-// 创建卫星轨迹
-function createSatelliteTrack(radius, numPoints) {
-  const points = []
-  for (let i = 0; i < numPoints; i++) {
-    const angle = (i / numPoints) * Math.PI * 2
-    const x = Math.cos(angle)
-    const y = Math.sin(angle)
-    points.push(new THREE.Vector3(x * radius, y * radius, 0))
+      });
+    });
   }
 
-  const geometry = new THREE.BufferGeometry().setFromPoints(points)
-  const material = new THREE.LineDashedMaterial({
-    color: '#ffffff', // 线条颜色
-    linewidth: 2, // 线条宽度
-    scale: 2, // 虚线比例
-    dashSize: 4, // 虚线段长度
-    gapSize: 1, // 虚线间隙长度
-  })
-  const line = new THREE.LineSegments(geometry, material)
-  return line
-}
-
-// 创建卫星轨迹
-function createSatelliteTrack2(radius, numPoints) {
-  const points = []
-  for (let i = 0; i < numPoints; i++) {
-    const angle = (i / numPoints) * Math.PI * 2
-    const x = Math.cos(angle)
-    const y = Math.sin(angle)
-    points.push(new THREE.Vector3(x * radius, 0, y * radius))
+  private emits(type: EathEventType, data?: unknown) {
+    if (type === 'modal-loaded') {
+      this.onModalLoadCallbacks.forEach((callback: CallbackType) => {
+        callback(data);
+      });
+    } else if (type === 'cailiao-loaded') {
+      this.onCailiaoCallbacks.forEach((callback: CallbackType) => {
+        callback(data);
+      });
+    }
   }
 
-  const geometry = new THREE.BufferGeometry().setFromPoints(points)
-  const material = new THREE.LineDashedMaterial({
-    color: '#ffffff', // 线条颜色
-    linewidth: 2, // 线条宽度
-    scale: 2, // 虚线比例
-    dashSize: 4, // 虚线段长度
-    gapSize: 1, // 虚线间隙长度
-  })
-  const line = new THREE.LineSegments(geometry, material)
-  return line
-}
+  /**
+   * @description 订阅事件
+   * @param type
+   * @param callback
+   */
+  subscribe(type: EathEventType, callback: CallbackType) {
+    if (type === 'modal-loaded') {
+      this.onModalLoadCallbacks.push(callback);
+    } else if (type === 'cailiao-loaded') {
+      this.onCailiaoCallbacks.push(callback);
+    }
+  }
 
-function onWindowResize() {
-  camera!.aspect = window.innerWidth / window.innerHeight
-  camera!.updateProjectionMatrix()
+  /**
+   * @description 开始创建
+   * @param elmentId Dom元素ID
+   */
+  create() {
+    this.camera = new PerspectiveCamera(
+      45,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000,
+    );
+    this.renderer = new WebGLRenderer();
+    this.renderer.setClearColor(0xeeeeee);
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    const axisHelp = new AxesHelper(20);
+    this.scene.add(axisHelp);
 
-  renderer!.setSize(window.innerWidth, window.innerHeight)
-}
+    const planeGeometry = new PlaneGeometry(60, 20, 1.1);
+    const planeMaterial = new MeshBasicMaterial({
+      color: 'red',
+    });
+    const plane = new Mesh(planeGeometry, planeMaterial);
+    plane.rotation.x = -0.5 * Math.PI;
+    plane.position.x = 15;
+    plane.position.y = 0;
+    plane.position.z = 0;
+    this.scene.add(plane);
 
-async function animate() {
-  const delta = clock!.getDelta()
-  globe!.rotation.y += delta * 0.025
-  satellite &&
-    satellite.position.set(
-      Math.cos(Date.now() * 0.0001) * 1.5,
-      Math.sin(Date.now() * 0.0001) * 1.5,
-      0,
-    )
-  satellite &&
-    Object.assign(satellite.rotation, {
-      x: camera?.rotation.y,
-      y: camera?.rotation.z,
-      z: camera?.rotation.x,
-    })
-  controls!.update()
+    const cubeGeometry = new BoxGeometry(4, 4, 4);
+    const cubeMaterial = new MeshBasicMaterial({
+      color: 0xff0000,
+      wireframe: true,
+    });
+    const cube = new Mesh(cubeGeometry, cubeMaterial);
+    cube.position.x = -4;
+    cube.position.y = 3;
+    cube.position.z = 0;
+    this.scene.add(cube);
+    this.renderer.render(this.scene, this.camera);
+    this.addCameraHelp();
+    document.getElementById(this.domId)?.append(this.renderer.domElement);
+  }
 
-  scene && renderer!.render(scene, camera)
+  //#region help类
+  addCameraHelp() {
+    const helper = new CameraHelper(this.camera);
+
+    const grid = new GridHelper(1000, 100, 'red', 'blue');
+    grid.material.opacity = 0.2;
+    grid.material.transparent = true;
+    this.scene.add(helper);
+    this.scene.add(grid);
+  }
+  //#endregion
 }
